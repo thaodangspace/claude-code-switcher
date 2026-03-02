@@ -41,11 +41,11 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 
 	// Map of known field names to their corresponding field handling
 	knownFields := map[string]func(interface{}){
-		"permissions":     func(v interface{}) { s.Permissions = toMap(v) },
-		"model":           func(v interface{}) { s.Model = toString(v) },
-		"statusLine":      func(v interface{}) { s.StatusLine = toMap(v) },
-		"enabledPlugins":  func(v interface{}) { s.EnabledPlugins = toMap(v) },
-		"env":             func(v interface{}) { s.Env = toMap(v) },
+		"permissions":    func(v interface{}) { s.Permissions = toMap(v) },
+		"model":          func(v interface{}) { s.Model = toString(v) },
+		"statusLine":     func(v interface{}) { s.StatusLine = toMap(v) },
+		"enabledPlugins": func(v interface{}) { s.EnabledPlugins = toMap(v) },
+		"env":            func(v interface{}) { s.Env = toMap(v) },
 	}
 
 	// Process known fields, store unknown fields in Extra
@@ -224,9 +224,9 @@ func loadAccountProfile(name string, claudeDir string) (OAuthAccount, error) {
 // listProfiles scans for available providers and accounts and prints them
 func listProfiles(claudeDir string) error {
 	nonProfileFiles := map[string]bool{
-		"settings.json":          true,
+		"settings.json":             true,
 		"mcp-needs-auth-cache.json": true,
-		"stats-cache.json":       true,
+		"stats-cache.json":          true,
 	}
 
 	// Scan ~/.claude/*.json for providers
@@ -357,6 +357,110 @@ func mergeEnv(settings *Settings, providerEnv map[string]interface{}) {
 	}
 }
 
+// showCurrent displays the current provider and account
+func showCurrent(claudeDir string) error {
+	settingsPath := filepath.Join(claudeDir, settingsFile)
+	settings, err := loadSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	fmt.Println("Claude Code:")
+	if settings.Env != nil {
+		provider := detectCurrentProvider(claudeDir, settings.Env)
+		if provider != "" {
+			fmt.Printf("  %s\n", provider)
+			return nil
+		}
+	}
+
+	claudeJsonPath, err := getClaudeJsonPath()
+	if err != nil {
+		return fmt.Errorf("failed to get claude.json path: %w", err)
+	}
+	cj, err := loadClaudeJson(claudeJsonPath)
+	if err != nil {
+		return fmt.Errorf("failed to load claude.json: %w", err)
+	}
+
+	if cj.OAuthAccount == nil {
+		fmt.Println("  default")
+	} else {
+		email := toString(cj.OAuthAccount["emailAddress"])
+		name := toString(cj.OAuthAccount["displayName"])
+		if email != "" {
+			fmt.Printf("  %s (%s)\n", name, email)
+		} else {
+			fmt.Println("  default")
+		}
+	}
+
+	return nil
+}
+
+// detectCurrentProvider tries to identify the current provider by matching env
+func detectCurrentProvider(claudeDir string, currentEnv map[string]interface{}) string {
+	nonProfileFiles := map[string]bool{
+		"settings.json":             true,
+		"mcp-needs-auth-cache.json": true,
+		"stats-cache.json":          true,
+	}
+
+	entries, err := os.ReadDir(claudeDir)
+	if err != nil {
+		return "custom"
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		if nonProfileFiles[entry.Name()] {
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(claudeDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		var raw map[string]interface{}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			continue
+		}
+		env, hasEnv := raw["env"]
+		if !hasEnv {
+			continue
+		}
+		providerEnv, ok := env.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if envMapsEqual(providerEnv, currentEnv) {
+			return strings.TrimSuffix(entry.Name(), ".json")
+		}
+	}
+
+	var envStrs []string
+	for k := range currentEnv {
+		envStrs = append(envStrs, k)
+	}
+	return fmt.Sprintf("custom (%s)", strings.Join(envStrs, ", "))
+}
+
+// envMapsEqual compares two env maps for equality
+func envMapsEqual(a, b map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 // printUsage prints usage information
 func printUsage() {
 	fmt.Println("Claude Code Switcher (ccs)")
@@ -366,10 +470,12 @@ func printUsage() {
 	fmt.Println("  ccs account <name>    Switch to a claude.ai account profile")
 	fmt.Println("  ccs account           Reset to default claude.ai account")
 	fmt.Println("  ccs list              List available providers and accounts")
+	fmt.Println("  ccs current           Show current provider and account")
 	fmt.Println("\nExamples:")
 	fmt.Println("  ccs glm               Switch to glm provider")
 	fmt.Println("  ccs account personal  Switch to personal claude.ai account")
 	fmt.Println("  ccs list              Show all providers and accounts")
+	fmt.Println("  ccs current           Show current provider and account")
 	fmt.Println("  ccs                   Reset to default")
 	fmt.Println("\nProvider configs: ~/.claude/<name>.json")
 	fmt.Println("Account configs:  ~/.claude/accounts/<name>.json")
@@ -390,6 +496,15 @@ func main() {
 	// Handle "ccs list"
 	if len(args) == 1 && args[0] == "list" {
 		if err := listProfiles(claudeDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Handle "ccs current"
+	if len(args) == 1 && args[0] == "current" {
+		if err := showCurrent(claudeDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
