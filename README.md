@@ -41,6 +41,11 @@ ccs account personal
 # Reset to default claude.ai account
 ccs account
 
+# Run a parallel session with an isolated configuration without affecting global settings
+ccs run openrouter
+ccs run account personal
+ccs run openrouter account personal -- -p "What is the capital of France?"
+
 # List available providers and accounts
 ccs list
 ```
@@ -82,4 +87,5 @@ Create account profiles at `~/.claude/accounts/<name>.json`. Copy the `oauthAcco
 
 - **Provider mode**: `ccs <provider>` reads `~/.claude/<name>.json` and merges its `env` block into `~/.claude/settings.json`
 - **Account mode**: `ccs account <name>` updates `~/.claude.json`'s `oauthAccount` field and clears env from settings
+- **Run mode**: `ccs run [provider] [account] [--] [claude args...]` creates a temporary directory in `~/.claude/runs/session-...` with combined configurations and executes `claude` with `CLAUDE_CONFIG_DIR` set to the temporary directory. The temporary directory is automatically deleted after `claude` exits.
 - **Reset**: Running `ccs` or `ccs account` with no arguments removes the `env` key, restoring default behavior
