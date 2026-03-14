@@ -11,6 +11,27 @@ import (
 	"time"
 )
 
+// linkClaudeConfigDir symlinks all files and directories from src to dest,
+// skipping ccs, runs, and settings files, to preserve global skills/hooks/commands.
+func linkClaudeConfigDir(src, dest string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "ccs" || name == "runs" || strings.HasPrefix(name, "settings.json") {
+			continue
+		}
+		srcPath := filepath.Join(src, name)
+		destPath := filepath.Join(dest, name)
+		if err := os.Symlink(srcPath, destPath); err != nil && !os.IsExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 // parseRunArgs separates profile names and claude CLI arguments from the combined args slice.
 // Profiles that exist in ccsDir are consumed first (provider first, then account),
 // and the rest are forwarded to claude as-is.
@@ -66,6 +87,15 @@ func runSession(claudeDir string, ccsDir string, args []string) (int, error) {
 		return 1, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
+
+	// Symlink all other items from the global claude directory to retain skills, hooks, mcp.json, etc.
+	if err := linkClaudeConfigDir(claudeDir, tempDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to link base config items: %v\n", err)
+	}
+	// Also symlink into the .claude subfolder for fallback compatibility
+	if err := linkClaudeConfigDir(claudeDir, filepath.Join(tempDir, ".claude")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to link base config items (.claude): %v\n", err)
+	}
 
 	// Load base claude.json (fall back to empty if missing).
 	claudeJsonPath, _ := getClaudeJsonPath()
