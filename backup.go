@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 )
@@ -68,10 +67,7 @@ func backupProviderCmd(claudeDir string, ccsDir string, name string) {
 		os.Exit(1)
 	}
 
-	// Get user's home directory for display path
-	usr, _ := user.Current()
-	displayPath := filepath.Join(usr.HomeDir, ".claude", "ccs", name+".json")
-	fmt.Printf("Saved provider '%s' to %s\n", name, displayPath)
+	fmt.Printf("Saved provider '%s' to ~/.claude/ccs/%s.json\n", name, name)
 }
 
 // backupAccountCmd saves current oauthAccount to a named profile.
@@ -99,8 +95,5 @@ func backupAccountCmd(ccsDir string, name string) {
 		os.Exit(1)
 	}
 
-	// Get user's home directory for display path
-	usr, _ := user.Current()
-	displayPath := filepath.Join(usr.HomeDir, ".claude", "ccs", name+".json")
-	fmt.Printf("Saved account '%s' to %s\n", name, displayPath)
+	fmt.Printf("Saved account '%s' to ~/.claude/ccs/%s.json\n", name, name)
 }
