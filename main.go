@@ -15,10 +15,14 @@ func printUsage() {
 	fmt.Println("  ccs <name>            Switch to a provider or account profile")
 	fmt.Println("  ccs list              List available providers and accounts")
 	fmt.Println("  ccs current           Show current provider and account")
+	fmt.Println("  ccs backup-provider <name>  Save current provider env as profile")
+	fmt.Println("  ccs backup-account <name>   Save current OAuth account as profile")
 	fmt.Println("  ccs run [names...] [--] [args...]  Run isolated claude session")
 	fmt.Println("\nExamples:")
 	fmt.Println("  ccs glm               Switch to 'glm' profile globally")
 	fmt.Println("  ccs personal          Switch to 'personal' profile globally")
+	fmt.Println("  ccs backup-provider mykey   Save current provider as 'mykey'")
+	fmt.Println("  ccs backup-account work     Save current account as 'work'")
 	fmt.Println("  ccs run glm -p hi     Run glm provider in isolated session with prompt")
 	fmt.Println("  ccs list              Show all profiles")
 	fmt.Println("  ccs current           Show current provider and account")
@@ -72,6 +76,20 @@ func main() {
 
 	case "reset":
 		resetCmd(claudeDir)
+
+	case "backup-provider":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Error: Usage: ccs backup-provider <name>\n")
+			os.Exit(1)
+		}
+		backupProviderCmd(claudeDir, ccsDir, args[1])
+
+	case "backup-account":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Error: Usage: ccs backup-account <name>\n")
+			os.Exit(1)
+		}
+		backupAccountCmd(ccsDir, args[1])
 
 	default:
 		switchProfile(args[0], claudeDir, ccsDir)
