@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // loadProfile reads a profile from ~/.claude/ccs/<name>.json.
@@ -31,57 +32,149 @@ func loadProfile(name string, ccsDir string) (*Profile, error) {
 	return &profile, nil
 }
 
-// listProfiles scans for available providers and accounts in ~/.claude/ccs and prints them.
-func listProfiles(ccsDir string) error {
+type ProviderListItem struct {
+	Name string `json:"name"`
+}
+
+type AccountListItem struct {
+	Name             string            `json:"name"`
+	Email            string            `json:"email,omitempty"`
+	AccountUUID      string            `json:"accountUuid,omitempty"`
+	Active           bool              `json:"active"`
+	Health           TokenHealthStatus `json:"health"`
+	AccessExpiresAt  *time.Time        `json:"accessExpiresAt,omitempty"`
+	RefreshExpiresAt *time.Time        `json:"refreshExpiresAt,omitempty"`
+	Detail           string            `json:"detail,omitempty"`
+}
+
+type ProfileListResult struct {
+	Providers []ProviderListItem `json:"providers"`
+	Accounts  []AccountListItem  `json:"accounts"`
+}
+
+// collectProfiles gathers list data without reading or mutating the active
+// Claude credential store. A bad snapshot affects only its own account.
+func collectProfiles(ccsDir string, currentAccount OAuthAccount, profileStore ProfileCredentialStore, now time.Time) (ProfileListResult, error) {
+	result := ProfileListResult{
+		Providers: make([]ProviderListItem, 0),
+		Accounts:  make([]AccountListItem, 0),
+	}
 	entries, err := os.ReadDir(ccsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			entries = []os.DirEntry{}
-		} else {
-			return fmt.Errorf("failed to read ccs directory: %w", err)
+			return result, nil
 		}
+		return result, fmt.Errorf("failed to read ccs directory: %w", err)
 	}
-
-	var providers []string
-	var accounts []string
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-
 		name := strings.TrimSuffix(entry.Name(), ".json")
 		profile, err := loadProfile(name, ccsDir)
 		if err != nil {
 			continue
 		}
-
 		if profile.Env != nil {
-			providers = append(providers, name)
+			result.Providers = append(result.Providers, ProviderListItem{Name: name})
 		}
-		if profile.OAuthAccount != nil {
-			accounts = append(accounts, name)
+		if profile.OAuthAccount == nil {
+			continue
 		}
-	}
 
+		item := AccountListItem{
+			Name:        name,
+			Email:       toString(profile.OAuthAccount["emailAddress"]),
+			AccountUUID: toString(profile.OAuthAccount["accountUuid"]),
+			Active:      accountIdentityMatches(profile.OAuthAccount, currentAccount),
+			Health:      TokenUnknown,
+		}
+		if profileStore == nil || !profileStore.Exists(name) {
+			item.Detail = "credential not saved"
+			result.Accounts = append(result.Accounts, item)
+			continue
+		}
+		credential, err := profileStore.Load(name)
+		if err != nil {
+			item.Detail = "credential unreadable"
+			result.Accounts = append(result.Accounts, item)
+			continue
+		}
+		health := EvaluateTokenHealth(credential, now)
+		item.Health = health.Status
+		item.Detail = health.Detail
+		item.AccessExpiresAt = health.AccessExpiresAt
+		item.RefreshExpiresAt = health.RefreshExpiresAt
+		result.Accounts = append(result.Accounts, item)
+	}
+	return result, nil
+}
+
+func listCurrentAccount(ccsDir string) OAuthAccount {
+	claudeJSONPath := claudeJsonPathForClaudeDir(filepath.Dir(ccsDir))
+	cj, err := loadClaudeJson(claudeJSONPath)
+	if err != nil {
+		return nil
+	}
+	return cj.OAuthAccount
+}
+
+// listProfiles scans available profiles and renders offline account health.
+func listProfiles(ccsDir string) error {
+	result, err := collectProfiles(ccsDir, listCurrentAccount(ccsDir), NewProfileCredentialStore(ccsDir), time.Now())
+	if err != nil {
+		return err
+	}
+	return renderProfileList(result)
+}
+
+func listProfilesJSON(ccsDir string) error {
+	result, err := collectProfiles(ccsDir, listCurrentAccount(ccsDir), NewProfileCredentialStore(ccsDir), time.Now())
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
+}
+
+func renderProfileList(result ProfileListResult) error {
 	fmt.Println("Providers:")
-	if len(providers) == 0 {
+	if len(result.Providers) == 0 {
 		fmt.Println("  (none)")
 	} else {
-		for _, p := range providers {
-			fmt.Printf("  %s\n", p)
+		for _, provider := range result.Providers {
+			fmt.Printf("  %s\n", provider.Name)
 		}
 	}
 
 	fmt.Println("Accounts:")
-	if len(accounts) == 0 {
+	if len(result.Accounts) == 0 {
 		fmt.Println("  (none)")
-	} else {
-		for _, a := range accounts {
-			fmt.Printf("  %s\n", a)
+		return nil
+	}
+	for _, account := range result.Accounts {
+		marker := " "
+		if account.Active {
+			marker = "*"
+		}
+		email := account.Email
+		if email == "" {
+			email = "-"
+		}
+		detail := account.Detail
+		if account.Health == TokenReady && account.AccessExpiresAt != nil {
+			detail = "access " + formatTokenDuration(time.Now(), *account.AccessExpiresAt)
+		} else if account.Health == TokenRefreshNeeded && account.RefreshExpiresAt != nil {
+			detail = "refresh " + formatTokenDuration(time.Now(), *account.RefreshExpiresAt)
+		}
+		if detail != "" {
+			fmt.Printf("%s %-20s %-28s %-16s %s\n", marker, account.Name, email, account.Health, detail)
+		} else {
+			fmt.Printf("%s %-20s %-28s %s\n", marker, account.Name, email, account.Health)
 		}
 	}
-
 	return nil
 }
 

@@ -32,9 +32,9 @@ func printUsage() {
 
 func main() {
 	flag.Usage = printUsage
-	flag.Parse()
-
-	args := flag.Args()
+	// Command-specific options (for example `ccs list --json`) are parsed
+	// after the command name rather than by the global flag set.
+	args := os.Args[1:]
 
 	if len(args) == 0 {
 		printUsage()
@@ -55,8 +55,18 @@ func main() {
 
 	switch args[0] {
 	case "list":
-		if err := listProfiles(ccsDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		var listErr error
+		switch {
+		case len(args) == 1:
+			listErr = listProfiles(ccsDir)
+		case len(args) == 2 && args[1] == "--json":
+			listErr = listProfilesJSON(ccsDir)
+		default:
+			fmt.Fprintf(os.Stderr, "Error: Usage: ccs list [--json]\n")
+			os.Exit(1)
+		}
+		if listErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", listErr)
 			os.Exit(1)
 		}
 
