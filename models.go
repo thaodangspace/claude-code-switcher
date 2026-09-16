@@ -132,6 +132,14 @@ type ClaudeAIOAuthCredential struct {
 // Expiry values are deliberately restricted to integer JSON numbers: accepting
 // an unknown format would make local health classification unsafe.
 func (c *ClaudeAIOAuthCredential) UnmarshalJSON(data []byte) error {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return fmt.Errorf("OAuth credential must be a JSON object")
+	}
+	c.AccessToken = ""
+	c.RefreshToken = ""
+	c.ExpiresAt = 0
+	c.RefreshTokenExpiresAt = 0
+	c.Extra = nil
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -210,6 +218,9 @@ type CredentialContainer struct {
 // UnmarshalJSON decodes the active credential document without dropping
 // unrelated credential data such as mcpOAuth.
 func (c *CredentialContainer) UnmarshalJSON(data []byte) error {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return fmt.Errorf("credential container must be a JSON object")
+	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err

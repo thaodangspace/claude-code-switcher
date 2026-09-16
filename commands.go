@@ -74,16 +74,17 @@ func resetCmd(claudeDir string) {
 func accountIdentityMatches(a, b OAuthAccount) bool {
 	aUUID := toString(a["accountUuid"])
 	bUUID := toString(b["accountUuid"])
-	if aUUID != "" || bUUID != "" {
-		return aUUID != "" && bUUID != "" && aUUID == bUUID
+	if aUUID != "" && bUUID != "" {
+		return aUUID == bUUID
 	}
+	// Email is the compatibility fallback when either record lacks a UUID.
 	aEmail := toString(a["emailAddress"])
 	bEmail := toString(b["emailAddress"])
 	return aEmail != "" && bEmail != "" && aEmail == bEmail
 }
 
 // findProfileForOAuthAccount finds the saved profile for an active account,
-// using UUID first and email only when neither side has a UUID.
+// using UUID first and email only when a UUID is unavailable.
 func findProfileForOAuthAccount(ccsDir string, account OAuthAccount) (string, bool) {
 	entries, err := os.ReadDir(ccsDir)
 	if err != nil {
@@ -112,6 +113,9 @@ func restoreRotatedSnapshot(store ProfileCredentialStore, name string, existed b
 // switchAccountProfile applies an account profile as a rollback-safe
 // transaction, including the matching active Claude OAuth credential.
 func switchAccountProfile(name string, profile *Profile, claudeDir string, ccsDir string, activeStore ClaudeCredentialStore, profileStore ProfileCredentialStore) error {
+	if activeStore == nil || profileStore == nil {
+		return fmt.Errorf("credential stores are unavailable")
+	}
 	if profile == nil || profile.OAuthAccount == nil {
 		return fmt.Errorf("profile is not an account profile")
 	}

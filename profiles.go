@@ -122,11 +122,12 @@ func listCurrentAccount(ccsDir string) OAuthAccount {
 
 // listProfiles scans available profiles and renders offline account health.
 func listProfiles(ccsDir string) error {
-	result, err := collectProfiles(ccsDir, listCurrentAccount(ccsDir), NewProfileCredentialStore(ccsDir), time.Now())
+	now := time.Now()
+	result, err := collectProfiles(ccsDir, listCurrentAccount(ccsDir), NewProfileCredentialStore(ccsDir), now)
 	if err != nil {
 		return err
 	}
-	return renderProfileList(result)
+	return renderProfileListAt(result, now)
 }
 
 func listProfilesJSON(ccsDir string) error {
@@ -140,6 +141,10 @@ func listProfilesJSON(ccsDir string) error {
 }
 
 func renderProfileList(result ProfileListResult) error {
+	return renderProfileListAt(result, time.Now())
+}
+
+func renderProfileListAt(result ProfileListResult, now time.Time) error {
 	fmt.Println("Providers:")
 	if len(result.Providers) == 0 {
 		fmt.Println("  (none)")
@@ -165,9 +170,9 @@ func renderProfileList(result ProfileListResult) error {
 		}
 		detail := account.Detail
 		if account.Health == TokenReady && account.AccessExpiresAt != nil {
-			detail = "access " + formatTokenDuration(time.Now(), *account.AccessExpiresAt)
+			detail = "access " + formatTokenDuration(now, *account.AccessExpiresAt)
 		} else if account.Health == TokenRefreshNeeded && account.RefreshExpiresAt != nil {
-			detail = "refresh " + formatTokenDuration(time.Now(), *account.RefreshExpiresAt)
+			detail = "refresh " + formatTokenDuration(now, *account.RefreshExpiresAt)
 		}
 		if detail != "" {
 			fmt.Printf("%s %-20s %-28s %-16s %s\n", marker, account.Name, email, account.Health, detail)

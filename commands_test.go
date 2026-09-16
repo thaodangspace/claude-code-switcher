@@ -10,8 +10,10 @@ import (
 )
 
 type memoryCredentialStore struct {
-	container *CredentialContainer
-	failSaves int
+	container   *CredentialContainer
+	failSaves   int
+	saveCount   int
+	onFirstSave func()
 }
 
 func (s *memoryCredentialStore) Load() (*CredentialContainer, error) {
@@ -19,6 +21,10 @@ func (s *memoryCredentialStore) Load() (*CredentialContainer, error) {
 }
 
 func (s *memoryCredentialStore) Save(container *CredentialContainer) error {
+	s.saveCount++
+	if s.saveCount == 1 && s.onFirstSave != nil {
+		s.onFirstSave()
+	}
 	if s.failSaves > 0 {
 		s.failSaves--
 		return errors.New("injected save failure")
@@ -101,7 +107,7 @@ func writeAccountFixture(t *testing.T, ccsDir string, account OAuthAccount, env 
 func TestBackupAccountSavesMetadataAndCredentialSeparately(t *testing.T) {
 	root := t.TempDir()
 	ccsDir := filepath.Join(root, ".claude", "ccs")
-	account := OAuthAccount{"accountUuid": "a", "emailAddress": "a@example.com"}
+	account := OAuthAccount{"accountUuid": "a", "emailAddress": "a@example.com", "accessToken": "metadata-secret", "refreshToken": "metadata-refresh"}
 	writeAccountFixture(t, ccsDir, account, nil)
 	active := &memoryCredentialStore{container: &CredentialContainer{ClaudeAIOAuth: &ClaudeAIOAuthCredential{AccessToken: "access-secret", RefreshToken: "refresh-secret", ExpiresAt: 100}}}
 	profiles := NewFileProfileCredentialStore(ccsDir)
@@ -112,7 +118,7 @@ func TestBackupAccountSavesMetadataAndCredentialSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(profileData), "access-secret") || strings.Contains(string(profileData), "refresh-secret") {
+	if strings.Contains(string(profileData), "access-secret") || strings.Contains(string(profileData), "refresh-secret") || strings.Contains(string(profileData), "metadata-secret") || strings.Contains(string(profileData), "metadata-refresh") {
 		t.Fatal("normal profile contains OAuth secret")
 	}
 	snapshot, err := profiles.Load("account-a")

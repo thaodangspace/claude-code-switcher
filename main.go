@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // printUsage prints usage information for the ccs CLI.
@@ -13,7 +14,7 @@ func printUsage() {
 	fmt.Println("  ccs                   Show this help menu")
 	fmt.Println("  ccs reset             Reset to default provider and account")
 	fmt.Println("  ccs <name>            Switch to a provider or account profile")
-	fmt.Println("  ccs list              List available providers and accounts")
+	fmt.Println("  ccs list [--json]     List profiles and offline OAuth health")
 	fmt.Println("  ccs current           Show current provider and account")
 	fmt.Println("  ccs backup-provider <name>  Save current provider env as profile")
 	fmt.Println("  ccs backup-account <name>   Save current OAuth account as profile")
@@ -24,7 +25,8 @@ func printUsage() {
 	fmt.Println("  ccs backup-provider mykey   Save current provider as 'mykey'")
 	fmt.Println("  ccs backup-account work     Save current account as 'work'")
 	fmt.Println("  ccs run glm -p hi     Run glm provider in isolated session with prompt")
-	fmt.Println("  ccs list              Show all profiles")
+	fmt.Println("  ccs list              Show all profiles and local OAuth health")
+	fmt.Println("  ccs list --json       Show secret-free machine-readable profiles")
 	fmt.Println("  ccs current           Show current provider and account")
 	fmt.Println("  ccs reset             Reset to defaults")
 	fmt.Println("\nConfig Directory: ~/.claude/ccs/")
@@ -36,6 +38,10 @@ func main() {
 	// after the command name rather than by the global flag set.
 	args := os.Args[1:]
 
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+		printUsage()
+		return
+	}
 	if len(args) == 0 {
 		printUsage()
 		return
@@ -47,10 +53,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	ccsDir, err := getCcsDir(claudeDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+	var ccsDir string
+	if args[0] == "list" {
+		// Listing is read-only: do not create ~/.claude/ccs when it is absent.
+		ccsDir = filepath.Join(claudeDir, "ccs")
+	} else {
+		ccsDir, err = getCcsDir(claudeDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	switch args[0] {

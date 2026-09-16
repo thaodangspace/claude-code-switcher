@@ -27,6 +27,9 @@ func EvaluateTokenHealth(c *ClaudeAIOAuthCredential, now time.Time) TokenHealth 
 	if c == nil {
 		return TokenHealth{Status: TokenUnknown, Detail: "credential not saved"}
 	}
+	if c.ExpiresAt < 0 || c.RefreshTokenExpiresAt < 0 {
+		return TokenHealth{Status: TokenUnknown, Detail: "unsupported expiry"}
+	}
 
 	health := TokenHealth{}
 	if c.ExpiresAt > 0 {

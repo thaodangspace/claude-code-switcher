@@ -1,33 +1,39 @@
 # Claude Code Switcher (ccs)
 
-`ccs` is a CLI tool to effortlessly switch between API provider configurations and OAuth accounts for [Claude Code](https://claude.ai/code). It allows you to maintain multiple profiles and apply them globally or use them in isolated sessions.
-
-## Features
-
-- **Consolidated Management**: Store all provider and account profiles in `~/.claude/ccs/`.
-- **Global Switching**: Switch your primary Claude configuration with a single command.
-- **Isolated Sessions**: Run `claude` with a specific provider configuration without affecting your global settings.
-- **Auto-Detection**: Distinguishes between API providers (Bedrock, OpenRouter, etc.) and claude.ai OAuth accounts automatically.
+`ccs` switches between Claude Code provider profiles and Claude OAuth account profiles.
 
 ## Install
 
 ```sh
-# Clone the repository
 git clone https://github.com/thaodangspace/claude-code-switcher
 cd claude-code-switcher
-
-# Build and install
 go build -o ccs .
 mv ccs /usr/local/bin/ccs
 ```
 
-## Setup
+## Storage and privacy
 
-Create a profile JSON file for each provider or account in `~/.claude/ccs/`.
+Provider/account metadata is stored in:
 
-### Provider Profile
-For non-standard API providers, create a profile with an `env` block.
-Example: `~/.claude/ccs/openrouter.json`
+```text
+~/.claude/ccs/<name>.json
+```
+
+OAuth secrets are never stored in that normal profile file. Account credential snapshots are stored separately in:
+
+```text
+~/.claude/ccs/credentials/<name>.json
+```
+
+On Unix, the snapshot directory is `0700` and snapshot files are `0600`. The active Claude credential container is read from `~/.claude/.credentials.json` on Linux/Windows. On macOS, CCS uses Claude Code's existing Keychain item (`Claude Code-credentials`) and only falls back to the file when that item is absent.
+
+CCS preserves unknown credential fields and unrelated data such as `mcpOAuth` when replacing `claudeAiOauth`. Tokens are not printed by `ccs list`, `ccs list --json`, or normal error messages.
+
+## Profiles
+
+### Provider profile
+
+Create `~/.claude/ccs/openrouter.json`:
 
 ```json
 {
@@ -38,9 +44,9 @@ Example: `~/.claude/ccs/openrouter.json`
 }
 ```
 
-### Account Profile
-For switching between different `claude.ai` accounts (e.g., Personal vs. Work), create a profile with an `oauthAccount` block. You can find your current account data in `~/.claude.json`.
-Example: `~/.claude/ccs/personal.json`
+### OAuth account profile
+
+Account metadata contains identity information only:
 
 ```json
 {
@@ -53,42 +59,77 @@ Example: `~/.claude/ccs/personal.json`
 }
 ```
 
+Create or upgrade an account profile with the active Claude login:
+
+```sh
+ccs backup-account work
+```
+
+This saves metadata and a private `claudeAiOauth` snapshot separately.
+
 ## Usage
 
-### Global Switch
-Switch your global Claude configuration to a specific profile:
-
 ```sh
-# Switch to a provider profile
-ccs openrouter
-
-# Switch to an account profile
-ccs personal
+ccs openrouter                 # switch provider
+ccs work                      # switch account and restore its OAuth credential
+ccs backup-provider local     # save current provider environment
+ccs backup-account work       # save current account metadata and credential
+ccs list                      # list profiles and local OAuth health
+ccs list --json               # machine-readable, secret-free listing
+ccs current                   # show the active provider/account
+ccs reset                     # clear provider overrides and account metadata
 ```
 
-### Isolated Session
-Run a parallel Claude session with a specific provider configuration. This creates a temporary sandbox for Claude that is automatically cleaned up after exit.
+Account switching restores both `oauthAccount` metadata and the matching `claudeAiOauth` credential. Before switching away, CCS saves the currently active account's latest credential when its UUID matches a saved profile (email is used only when a UUID is unavailable). Provider switching behavior is unchanged.
+
+## Offline OAuth health
+
+`ccs list` performs no network requests, refreshes no tokens, and does not read the active credential store. It evaluates saved snapshots locally:
+
+- **`ready`** — an access token exists and its local expiry is in the future.
+- **`refresh-needed`** — access is missing/expired and a refresh token appears locally usable. CCS does not refresh it.
+- **`re-login`** — access has expired and no locally usable refresh path remains.
+- **`unknown`** — no snapshot exists or the saved credential cannot be safely parsed.
+
+These are offline/local classifications, not server verification. A future local expiry does not prove that a token has not been revoked or invalidated by rotation.
+
+Human output includes the account email, health state, and a short local expiry duration. JSON output has stable profile data and expiry timestamps, but never includes `accessToken`, `refreshToken`, or raw credential JSON. Example:
+
+```json
+{
+  "providers": [{"name": "openrouter"}],
+  "accounts": [{
+    "name": "work",
+    "email": "me@company.com",
+    "accountUuid": "...",
+    "active": true,
+    "health": "ready",
+    "accessExpiresAt": "2026-09-16T21:30:00Z",
+    "detail": "access token valid"
+  }]
+}
+```
+
+## Migrating legacy account profiles
+
+Older profiles may contain only `oauthAccount` metadata. They remain visible in `ccs list` as `unknown` with `credential not saved`, but CCS refuses to switch to them because metadata-only switching can pair one account with another account's token.
+
+Upgrade one after logging into the desired account in Claude Code:
 
 ```sh
-# Run with openrouter provider and pass arguments to claude
+claude
+# /login if needed
+ccs backup-account work
+```
+
+CCS does not automatically associate an active credential with an arbitrary legacy profile.
+
+## Isolated sessions
+
+Run a provider profile in a temporary isolated configuration:
+
+```sh
 ccs run openrouter -- -p "What is the capital of France?"
 ```
-*Note: `ccs run` currently only supports provider profiles.*
 
-### Management
-```sh
-# List all available profiles
-ccs list
-
-# Show the currently active profile
-ccs current
-
-# Reset to default (removes env overrides and clears account)
-ccs reset
-```
-
-## How it works
-
-- **Provider Mode**: When switching to a provider, `ccs` merges the `env` block into `~/.claude/settings.json` and clears the OAuth account in `~/.claude.json`.
-- **Account Mode**: When switching to an account, `ccs` updates `~/.claude.json` with the `oauthAccount` data and clears any `env` overrides in `~/.claude/settings.json`.
-- **Run Mode**: Creates a temporary directory, populates it with the target configuration, and executes `claude` with `CLAUDE_CONFIG_DIR` pointing to the temporary path.
+`ccs run` currently supports provider profiles only.

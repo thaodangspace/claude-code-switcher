@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // ClaudeCredentialStore reads and writes Claude Code's active credential
@@ -80,7 +81,18 @@ func atomicWritePrivateFile(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	if err := os.Rename(tempPath, path); err != nil {
-		return err
+		// Windows does not replace an existing destination with Rename. The
+		// fallback still uses a private, fully-written file and is only used
+		// on platforms where replacement rename is unavailable.
+		if runtime.GOOS != "windows" {
+			return err
+		}
+		if removeErr := os.Remove(path); removeErr != nil {
+			return err
+		}
+		if renameErr := os.Rename(tempPath, path); renameErr != nil {
+			return renameErr
+		}
 	}
 	// Rename preserves the temporary file's private mode. Chmod also handles
 	// platforms/filesystems with unusual CreateTemp defaults.

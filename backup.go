@@ -19,6 +19,21 @@ func filterAnthropicEnv(env map[string]interface{}) map[string]interface{} {
 	return result
 }
 
+// safeOAuthAccountMetadata copies account identity metadata while excluding
+// credential-shaped fields if a Claude config contains unexpected extras.
+func safeOAuthAccountMetadata(account OAuthAccount) OAuthAccount {
+	result := make(OAuthAccount)
+	for key, value := range account {
+		switch key {
+		case "accessToken", "refreshToken", "claudeAiOauth":
+			continue
+		default:
+			result[key] = value
+		}
+	}
+	return result
+}
+
 // saveProfile writes a profile to ~/.claude/ccs/<name>.json.
 // Prints overwrite warning if file already exists.
 func saveProfile(ccsDir string, name string, profile *Profile) error {
@@ -93,6 +108,9 @@ func backupProviderCmd(claudeDir string, ccsDir string, name string) {
 // coordinated operation. The credential snapshot is never written to the
 // normal profile file.
 func backupAccount(ccsDir string, name string, activeStore ClaudeCredentialStore, profileStore ProfileCredentialStore) error {
+	if activeStore == nil || profileStore == nil {
+		return fmt.Errorf("credential stores are unavailable")
+	}
 	if err := validateProfileName(name); err != nil {
 		return err
 	}
@@ -145,7 +163,7 @@ func backupAccount(ccsDir string, name string, activeStore ClaudeCredentialStore
 		_ = rollbackCredential()
 		return err
 	}
-	profile := &Profile{OAuthAccount: cj.OAuthAccount}
+	profile := &Profile{OAuthAccount: safeOAuthAccountMetadata(cj.OAuthAccount)}
 	if err := writeProfileFile(ccsDir, name, profile); err != nil {
 		credentialRollbackErr := rollbackCredential()
 		metadataRollbackErr := restoreProfileFile(ccsDir, name, oldMetadata, metadataExisted)
@@ -160,12 +178,12 @@ func backupAccount(ccsDir string, name string, activeStore ClaudeCredentialStore
 // backupAccountCmd retains the CLI's exit-code behavior around the testable
 // backupAccount operation.
 func backupAccountCmd(ccsDir string, name string) {
-	activeStore, err := newClaudeCredentialStore(filepath.Dir(ccsDir))
-	if err != nil {
+	if err := validateProfileName(name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	if err := validateProfileName(name); err != nil {
+	activeStore, err := newClaudeCredentialStore(filepath.Dir(ccsDir))
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
