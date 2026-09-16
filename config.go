@@ -31,6 +31,12 @@ func getClaudeJsonPath() (string, error) {
 	return filepath.Join(usr.HomeDir, ".claude.json"), nil
 }
 
+// claudeJsonPathForClaudeDir is also used by tests and injected command
+// operations. A Claude directory's sibling .claude.json is the active config.
+func claudeJsonPathForClaudeDir(claudeDir string) string {
+	return filepath.Join(filepath.Dir(claudeDir), ".claude.json")
+}
+
 // getCcsDir returns the ~/.claude/ccs directory path, creating it if needed.
 func getCcsDir(claudeDir string) (string, error) {
 	ccsDir := filepath.Join(claudeDir, "ccs")
