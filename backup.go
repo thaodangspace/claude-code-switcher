@@ -22,6 +22,9 @@ func filterAnthropicEnv(env map[string]interface{}) map[string]interface{} {
 // saveProfile writes a profile to ~/.claude/ccs/<name>.json.
 // Prints overwrite warning if file already exists.
 func saveProfile(ccsDir string, name string, profile *Profile) error {
+	if err := validateProfileName(name); err != nil {
+		return err
+	}
 	profilePath := filepath.Join(ccsDir, name+".json")
 
 	// Check if profile already exists

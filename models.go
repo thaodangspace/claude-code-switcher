@@ -1,6 +1,10 @@
 package main
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
 
 // Settings represents the Claude settings.json structure.
 // Uses custom JSON marshaling to preserve all unknown fields.
@@ -112,6 +116,156 @@ func (c *ClaudeJson) MarshalJSON() ([]byte, error) {
 		result["oauthAccount"] = c.OAuthAccount
 	}
 	return json.Marshal(result)
+}
+
+// ClaudeAIOAuthCredential is the Claude Code OAuth credential. Unknown fields
+// are retained so CCS can round-trip fields added by future Claude Code versions.
+type ClaudeAIOAuthCredential struct {
+	AccessToken           string
+	RefreshToken          string
+	ExpiresAt             int64
+	RefreshTokenExpiresAt int64
+	Extra                 map[string]json.RawMessage
+}
+
+// UnmarshalJSON decodes known OAuth fields while preserving unknown fields.
+// Expiry values are deliberately restricted to integer JSON numbers: accepting
+// an unknown format would make local health classification unsafe.
+func (c *ClaudeAIOAuthCredential) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.Extra = make(map[string]json.RawMessage)
+
+	for key, value := range raw {
+		switch key {
+		case "accessToken":
+			if err := json.Unmarshal(value, &c.AccessToken); err != nil {
+				return fmt.Errorf("invalid access token field")
+			}
+		case "refreshToken":
+			if err := json.Unmarshal(value, &c.RefreshToken); err != nil {
+				return fmt.Errorf("invalid refresh token field")
+			}
+		case "expiresAt":
+			if err := json.Unmarshal(value, &c.ExpiresAt); err != nil {
+				return fmt.Errorf("invalid expiresAt field")
+			}
+		case "refreshTokenExpiresAt":
+			if err := json.Unmarshal(value, &c.RefreshTokenExpiresAt); err != nil {
+				return fmt.Errorf("invalid refreshTokenExpiresAt field")
+			}
+		default:
+			c.Extra[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+	return nil
+}
+
+// MarshalJSON encodes known OAuth fields and all preserved unknown fields.
+func (c *ClaudeAIOAuthCredential) MarshalJSON() ([]byte, error) {
+	result := make(map[string]json.RawMessage, len(c.Extra)+4)
+	for key, value := range c.Extra {
+		result[key] = append(json.RawMessage(nil), value...)
+	}
+	if c.AccessToken != "" {
+		value, err := json.Marshal(c.AccessToken)
+		if err != nil {
+			return nil, err
+		}
+		result["accessToken"] = value
+	}
+	if c.RefreshToken != "" {
+		value, err := json.Marshal(c.RefreshToken)
+		if err != nil {
+			return nil, err
+		}
+		result["refreshToken"] = value
+	}
+	if c.ExpiresAt != 0 {
+		value, err := json.Marshal(c.ExpiresAt)
+		if err != nil {
+			return nil, err
+		}
+		result["expiresAt"] = value
+	}
+	if c.RefreshTokenExpiresAt != 0 {
+		value, err := json.Marshal(c.RefreshTokenExpiresAt)
+		if err != nil {
+			return nil, err
+		}
+		result["refreshTokenExpiresAt"] = value
+	}
+	return json.Marshal(result)
+}
+
+// CredentialContainer is the active Claude credential document. Only the
+// Claude OAuth subtree is modeled; every other top-level field is retained.
+type CredentialContainer struct {
+	ClaudeAIOAuth *ClaudeAIOAuthCredential
+	Extra         map[string]json.RawMessage
+}
+
+// UnmarshalJSON decodes the active credential document without dropping
+// unrelated credential data such as mcpOAuth.
+func (c *CredentialContainer) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.Extra = make(map[string]json.RawMessage)
+	c.ClaudeAIOAuth = nil
+	for key, value := range raw {
+		if key == "claudeAiOauth" {
+			if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+				continue
+			}
+			var oauth ClaudeAIOAuthCredential
+			if err := json.Unmarshal(value, &oauth); err != nil {
+				return fmt.Errorf("invalid claudeAiOauth credential")
+			}
+			c.ClaudeAIOAuth = &oauth
+			continue
+		}
+		c.Extra[key] = append(json.RawMessage(nil), value...)
+	}
+	return nil
+}
+
+// MarshalJSON encodes the complete credential document.
+func (c *CredentialContainer) MarshalJSON() ([]byte, error) {
+	result := make(map[string]json.RawMessage, len(c.Extra)+1)
+	for key, value := range c.Extra {
+		result[key] = append(json.RawMessage(nil), value...)
+	}
+	if c.ClaudeAIOAuth != nil {
+		value, err := json.Marshal(c.ClaudeAIOAuth)
+		if err != nil {
+			return nil, err
+		}
+		result["claudeAiOauth"] = value
+	}
+	return json.Marshal(result)
+}
+
+// ReplaceClaudeAIOAuth replaces only the Claude OAuth subtree.
+func (c *CredentialContainer) ReplaceClaudeAIOAuth(credential *ClaudeAIOAuthCredential) {
+	c.ClaudeAIOAuth = credential
+}
+
+// DecodeCredentialContainer decodes an active credential document.
+func DecodeCredentialContainer(data []byte) (*CredentialContainer, error) {
+	var container CredentialContainer
+	if err := json.Unmarshal(data, &container); err != nil {
+		return nil, err
+	}
+	return &container, nil
+}
+
+// EncodeCredentialContainer encodes an active credential document.
+func EncodeCredentialContainer(container *CredentialContainer) ([]byte, error) {
+	return json.Marshal(container)
 }
 
 // toMap safely casts an interface{} to map[string]interface{}.

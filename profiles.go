@@ -10,6 +10,9 @@ import (
 
 // loadProfile reads a profile from ~/.claude/ccs/<name>.json.
 func loadProfile(name string, ccsDir string) (*Profile, error) {
+	if err := validateProfileName(name); err != nil {
+		return nil, err
+	}
 	profilePath := filepath.Join(ccsDir, name+".json")
 	data, err := os.ReadFile(profilePath)
 	if err != nil {
